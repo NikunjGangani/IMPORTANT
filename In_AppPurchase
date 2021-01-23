@@ -4,6 +4,26 @@ let verifyReceiptURL = "https://sandbox.itunes.apple.com/verifyReceipt"
 let verifyReceiptURL = "https://buy.itunes.apple.com/verifyReceipt"
 #endif
 
+var isToGetPrice: Bool = true
+var productIDs: [String] = []
+    var productsArray: [SKProduct] = []
+    var isToGetPrice: Bool = true
+    var identifer: String = ""
+    var controllerOpen = UIViewController()
+    let receiptURL = Bundle.main.appStoreReceiptURL
+    var reciptProductId = ""
+    
+    let NCINAPPPURCHASE = "NCINAPPPURCHASE"
+let LIFETIMEPRODUCTID = "LifeTimeProductId"
+let UDIAPPRICE = "UDIAPPRICE"
+let NCIAPPRICE = "NCIAPPRICE"
+let subscriptionSecretkey = "14a58f4a08254d1ca3f4e721f808374a"
+let productIdentifierThreeMonths = "com.sn.scanme.3months"
+let productIdentifierOneYear = "com.sn.scanme.1year"
+let productIdentifierLifeTime = "com.sn.scanme.lifetime"
+
+let latestReciptObjectKey = "latestReciptObject"
+
 extension AppDelegate: SKProductsRequestDelegate, SKPaymentTransactionObserver, SKRequestDelegate {
 
     func productPurchaseMultiple(productIdentifier: [String], flgRestore: Bool, toGetPrice: Bool, controller: UIViewController) {
