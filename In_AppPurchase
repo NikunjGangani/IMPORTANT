@@ -1,0 +1,324 @@
+#if DEBUG
+let verifyReceiptURL = "https://sandbox.itunes.apple.com/verifyReceipt"
+#else
+let verifyReceiptURL = "https://buy.itunes.apple.com/verifyReceipt"
+#endif
+
+extension AppDelegate: SKProductsRequestDelegate, SKPaymentTransactionObserver, SKRequestDelegate {
+
+    func productPurchaseMultiple(productIdentifier: [String], flgRestore: Bool, toGetPrice: Bool, controller: UIViewController) {
+        isToGetPrice = toGetPrice
+        controllerOpen = controller
+        let productID: NSSet = NSSet(array: productIdentifier)
+        let productsRequest: SKProductsRequest = SKProductsRequest(productIdentifiers: productID as? Set<String> ?? Set<String>() )
+        productsRequest.delegate = self
+        productsRequest.start()
+    }
+
+    func productPurchase(productIdentifier: NSString, toGetPrice: Bool, controller: UIViewController) {
+        isToGetPrice = toGetPrice
+        controllerOpen = controller
+        identifer = productIdentifier as String
+        let  productsRequest: SKProductsRequest = SKProductsRequest(productIdentifiers: Set([productIdentifier as String]))
+        productsRequest.delegate = self
+        productsRequest.start()
+    }
+    
+    func restoreInAppPurchase() {
+        SKPaymentQueue.default().add(self)
+
+        SKPaymentQueue.default().restoreCompletedTransactions()
+    }
+
+    func setDataForInAppPurchase(transcationIdetifier: NSString) {
+        Utils.saveDataToUserDefault(transcationIdetifier, LIFETIMEPRODUCTID)
+
+    }
+
+    func isApplicationUpgraded() -> Bool {
+        let productStatus = Utils.getDataFromUserDefault(LIFETIMEPRODUCTID) as? String ?? ""
+//        #if DEBUG
+//            return false
+//        #endif
+        if productStatus == "Subcribed" || productStatus == "Lifetime" {
+            return true
+        } else if productStatus == "Expired" {
+            return false
+        }
+        return false
+    }
+
+    // MARK: - SKProductsRequest
+    func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
+
+        print(response.invalidProductIdentifiers)
+        print("----")
+        print(response.products)
+
+        //only need price
+        if isToGetPrice && response.products.count > 0 {
+            isToGetPrice = false
+            var priceArray = [[String: Any]]()
+            for product in response.products {
+                let validProduct: SKProduct = product as SKProduct
+                let title = validProduct.productIdentifier
+                let price = validProduct.localizedPrice
+
+                let dic = ["Title": title, "Price": price]
+                priceArray.append(dic as [String: Any])
+
+            }
+            UserDefaults.standard.set(priceArray, forKey: UDIAPPRICE)
+            NotificationCenter.default.post(name: NSNotification.Name(rawValue: NCIAPPRICE), object: priceArray)
+            return
+        }
+
+        let count: Int = response.products.count
+        if count > 0 {
+            SKPaymentQueue.default().add(self)
+
+            let validProduct: SKProduct = response.products[0] as SKProduct
+            if validProduct.productIdentifier ==  identifer {
+                //Purchase/buy
+                let payment = SKPayment(product: validProduct)
+                SKPaymentQueue.default().add(payment)
+            } else {
+                Utils.hideSpinner()
+                print(validProduct.productIdentifier)
+                Utils.alert(message: "There is no product \(identifer) found. Contact at mayihelpu4app@gmail.com")
+                
+            }
+        } else {
+            Utils.hideSpinner()
+            print(response.invalidProductIdentifiers)
+            Utils.alert(message: "There is no valid products find to purchase or restore. Contact at mayihelpu4app@gmail.com")
+        }
+    }
+    
+    func request(_ request: SKRequest, didFailWithError error: Error) {
+        Utils.hideSpinner()
+        print("Error Fetching product information")
+    }
+
+    func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
+
+        for transaction: AnyObject in transactions {
+            if let trans: SKPaymentTransaction = transaction as? SKPaymentTransaction {
+                switch trans.transactionState {
+                case .purchased:
+                    print("In App Payment Success")
+                    SKPaymentQueue.default().finishTransaction(transaction as? SKPaymentTransaction ?? SKPaymentTransaction())
+                    if transaction.payment?.productIdentifier == productIdentifierThreeMonths || transaction.payment?.productIdentifier == productIdentifierOneYear {
+                        self.setDataForInAppPurchase(transcationIdetifier: "Subcribed" as NSString)
+                        
+                    } else if transaction.payment?.productIdentifier == productIdentifierLifeTime {
+                        self.setDataForInAppPurchase(transcationIdetifier: "Lifetime" as NSString)
+                        
+                    }
+                    Utils.hideSpinner()
+                    NotificationCenter.default.post(name: NSNotification.Name(rawValue: NCINAPPPURCHASE), object: "You have purchased successfully.")
+
+                    getAppReceipt()
+                    break
+                case .failed:
+                    SKPaymentQueue.default().finishTransaction(transaction as? SKPaymentTransaction ?? SKPaymentTransaction())
+                    Utils.hideSpinner()
+                    let alert = UIAlertController(title: "", message: "Payment failed", preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .default, handler: {(_: UIAlertAction!) in
+                    }))
+
+                    controllerOpen.present(alert, animated: true, completion: nil)
+                case .restored:
+                    SKPaymentQueue.default().finishTransaction(transaction as? SKPaymentTransaction ?? SKPaymentTransaction())
+                    if transaction.payment?.productIdentifier == productIdentifierLifeTime {
+                        /*
+                        self.setDataForInAppPurchase(transcationIdetifier: "Lifetime" as NSString)
+                        NotificationCenter.default.post(name: NSNotification.Name(rawValue: NCINAPPPURCHASE), object: "You have restore successfully.")
+                        Flurry.logEvent("VC Restore Success", withParameters: [transaction.payment.productIdentifier: transaction.transactionIdentifier as Any])
+                        */
+                    } else {
+                        self.getAppReceipt(completionHandler: nil)
+                    }
+                    Utils.hideSpinner()
+                    
+                default:
+                    break
+                }
+            }
+        }
+    }
+   
+    func paymentQueue(_ queue: SKPaymentQueue, restoreCompletedTransactionsFailedWithError error: Error) {
+        print("Error Fetching product information\(error.localizedDescription)")
+        Utils.hideSpinner()
+        Utils.alert(message: error.localizedDescription)
+    }
+
+    func paymentQueueRestoreCompletedTransactionsFinished(_ queue: SKPaymentQueue) {
+        for transaction in queue.transactions {
+            if transaction.payment.productIdentifier == productIdentifierLifeTime {
+                self.setDataForInAppPurchase(transcationIdetifier: "Lifetime" as NSString)
+                NotificationCenter.default.post(name: NSNotification.Name(rawValue: NCINAPPPURCHASE), object: "You have restore successfully.")
+                
+                return
+            }
+        }
+        
+        if queue.transactions.count == 0 {
+            Utils.hideSpinner()
+            Utils.alert(message: "You have not purchased lifetime earlier!!. Looking into subscription receipt...")
+            //may be user subscribe and not used lifetime purchase
+            self.refreshReceipt()
+        }
+    }
+    
+    func paymentQueue(_ queue: SKPaymentQueue, removedTransactions transactions: [SKPaymentTransaction]) {
+        
+    }
+    
+    func paymentQueue(_ queue: SKPaymentQueue, updatedDownloads downloads: [SKDownload]) {
+        
+    }
+    
+    // MARK: - Receipt
+    func getAppReceipt(completionHandler: ((Bool?, Error?) -> Void)? = nil) {
+        let productStatus = Utils.getDataFromUserDefault(LIFETIMEPRODUCTID) as? String ?? ""
+        
+        if productStatus == "Lifetime" {
+            completionHandler?(true, nil)
+            return
+        }
+        
+        guard let receiptURL = receiptURL else {  /* receiptURL is nil, it would be very weird to end up here */  return }
+        do {
+            let receipt = try Data(contentsOf: receiptURL)
+            receiptValidation(receipt, completionHandler: completionHandler)
+        } catch {
+            // there is no app receipt, don't panic, ask apple to refresh it
+            refreshReceipt()
+        }
+    }
+    
+    func refreshReceipt() {
+        let appReceiptRefreshRequest = SKReceiptRefreshRequest(receiptProperties: nil)
+        appReceiptRefreshRequest.delegate = self
+        appReceiptRefreshRequest.start()
+    }
+    
+    func requestDidFinish(_ request: SKRequest) {
+        // a fresh receipt should now be present at the url
+        do {
+            let receipt = try Data(contentsOf: receiptURL!) //force unwrap is safe here, control can't land here if receiptURL is nil
+            receiptValidation(receipt, completionHandler: nil)
+        } catch {
+            // still no receipt, possible but unlikely to occur since this is the "success" delegate method
+        }
+    }
+    
+    func receiptValidation(_ receipt: Data, completionHandler: ((Bool?, Error?) -> Void)? = nil) {
+        let base64encodedReceipt = receipt.base64EncodedString()
+        let requestDictionary = ["receipt-data": base64encodedReceipt, "password": subscriptionSecretkey]
+        do {
+            let requestData = try JSONSerialization.data(withJSONObject: requestDictionary, options: JSONSerialization.WritingOptions.prettyPrinted)
+            let storeURL = URL(string: verifyReceiptURL)!
+            var storeRequest = URLRequest(url: storeURL)
+            storeRequest.httpMethod = "POST"
+            storeRequest.httpBody = requestData
+            
+            let session = URLSession(configuration: URLSessionConfiguration.default)
+            let task = session.dataTask(with: storeRequest, completionHandler: { [weak self] (data, _, error) in
+                if data == nil {
+                    completionHandler?(false, error)
+                    return
+                }
+                
+                do {
+                    let jsonResponse = try JSONSerialization.jsonObject(with: data!, options: JSONSerialization.ReadingOptions.mutableContainers)
+                    print("=======>", jsonResponse)
+                    //if user already restored for liftime successfully then no need to check receipt status
+                    let productStatus = Utils.getDataFromUserDefault(LIFETIMEPRODUCTID) as? String ?? ""
+                    
+                    if productStatus == "Lifetime" {
+                        completionHandler?(true, nil)
+                        return
+                    }
+                    
+                    if let latestReciptObject = self?.getExpirationDateFromResponse(jsonResponse as? NSDictionary ?? NSDictionary()) {
+                        print(latestReciptObject)
+                        if latestReciptObject.count > 0 {
+                            Utils.saveDataToUserDefault(latestReciptObject, latestReciptObjectKey)
+                            
+                            if let expireDate = self?.checkExpireDateInSubcripation(lastReceipt: latestReciptObject) {
+                                Utils.saveData(expireDate, forKey: "expireDate")
+                                if Date().isGreaterThan(expireDate) {
+                                    Utils.saveDataToUserDefault("Expired", LIFETIMEPRODUCTID)
+                                    completionHandler?(false, nil)
+                                } else {
+                                    Utils.saveDataToUserDefault("Subcribed", LIFETIMEPRODUCTID)
+                                    print("isGreaterThan\(String(describing: expireDate))")
+                                    completionHandler?(true, nil)
+                                }
+                            }
+                        }
+                    }
+                } catch let parseError {
+                    print(parseError)
+                    completionHandler?(false, parseError)
+                }
+            })
+            task.resume()
+        } catch let parseError {
+            print(parseError)
+            completionHandler?(false, parseError)
+        }
+    }
+    
+    func getExpirationDateFromResponse(_ jsonResponse: NSDictionary) -> [String: Any] {
+        
+        if let receiptInfo: NSArray = jsonResponse["latest_receipt_info"] as? NSArray {
+            
+            let lifeTimeReceipts = receiptInfo.filter {
+                if let dic = $0 as? [String: Any] {
+                    if dic["product_id"] as? String ?? "" == productIdentifierLifeTime {
+                        return true
+                    } else {
+                        return false
+                    }
+                } else {
+                    return false
+                }
+            }
+            
+            if lifeTimeReceipts.count > 0 {
+                return lifeTimeReceipts.first as? [String: Any] ?? [String: Any]()
+            } else {
+                let lastReceipt = receiptInfo.lastObject as? NSDictionary ?? NSDictionary()
+                return lastReceipt as? [String: Any] ?? [String: Any]()
+            }
+        } else {
+            return [:]
+        }
+    }
+    
+    func checkExpireDateInSubcripation(lastReceipt: [String: Any]) -> Date? {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss VV"
+        reciptProductId = lastReceipt["product_id"] as? String ?? ""
+        if let expiresDate = lastReceipt["expires_date"] as? String {
+            return formatter.date(from: expiresDate)
+        }
+        
+        return nil
+    }
+}
+
+extension SKProduct {
+
+    var localizedPrice: String? {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = priceLocale
+        return formatter.string(from: price)
+    }
+
+}
